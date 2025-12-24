@@ -795,7 +795,7 @@ window.addEventListener('click', (e) => {
 // Инициализация
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Инициализация приложения...');
-
+    initTheme();
     // Сначала загружаем ключи из HTML
     loadKeysFromHTML();
 
@@ -826,3 +826,34 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 });
+
+// Функция для переключения темы
+function toggleTheme() {
+    const currentTheme = document.documentElement.getAttribute('data-theme');
+    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+
+    document.documentElement.setAttribute('data-theme', newTheme);
+    localStorage.setItem('theme', newTheme);
+
+    const themeIcon = document.querySelector('.theme-toggle i');
+    showNotification(`Тема изменена на ${newTheme === 'dark' ? 'тёмную' : 'светлую'}`, 'info');
+}
+
+// Инициализация темы
+function initTheme() {
+    const savedTheme = localStorage.getItem('theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', savedTheme);
+
+    // Добавляем кнопку переключения темы в header
+    const headerRight = document.querySelector('.header-right');
+    if (headerRight && !document.querySelector('.theme-toggle')) {
+        const themeToggle = document.createElement('div');
+        themeToggle.className = 'theme-toggle';
+        themeToggle.onclick = toggleTheme;
+        themeToggle.innerHTML = `
+            <i class="fas fa-sun"></i>
+            <i class="fas fa-moon"></i>
+        `;
+        headerRight.insertBefore(themeToggle, headerRight.firstChild);
+    }
+}
