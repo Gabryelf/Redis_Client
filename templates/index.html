@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Redis Manager Pro</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <div class="header-left">
+                <h1><i class="fas fa-database"></i> Redis Manager Pro</h1>
+                <div class="status" id="redisStatus">
+                    <span id="statusText">Connecting...</span>
+                    <div class="status-indicator" id="statusIndicator"></div>
+                </div>
+            </div>
+            <div class="header-right">
+                <div class="connection-info" id="connectionInfo">
+                    <i class="fas fa-server"></i>
+                    <span>{{ stats.get('connected_clients', 0) }} clients</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Connection Form Card -->
+        <div class="card" id="connectionCard" style="display: none;">
+            <h2><i class="fas fa-plug"></i> Подключение к Redis</h2>
+            <form id="connectionForm" class="form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="redisHost">Хост:</label>
+                        <input type="text" id="redisHost" value="localhost" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="redisPort">Порт:</label>
+                        <input type="number" id="redisPort" value="6379" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="redisDB">База данных:</label>
+                        <input type="number" id="redisDB" value="0" min="0" max="15">
+                    </div>
+                    <div class="form-group">
+                        <label for="redisPassword">Пароль:</label>
+                        <input type="password" id="redisPassword" placeholder="(опционально)">
+                    </div>
+                </div>
+                <button type="submit" class="btn-primary">
+                    <i class="fas fa-link"></i> Подключиться
+                </button>
+            </form>
+        </div>
+
+        <!-- Main Content (shown when connected) -->
+        <div id="mainContent" style="display: {{ 'block' if connected else 'none' }};">
+            <!-- Stats Cards -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-key"></i>
+                    </div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="keysCount">{{ stats.get('keys_count', 0) }}</div>
+                        <div class="stat-label">Ключей</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-memory"></i>
+                    </div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="usedMemory">{{ stats.get('used_memory', '0B') }}</div>
+                        <div class="stat-label">Память</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-bolt"></i>
+                    </div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="opsPerSec">{{ stats.get('ops_per_sec', 0) }}</div>
+                        <div class="stat-label">Операций/сек</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-chart-line"></i>
+                    </div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="hitRate">
+                            {% set hits = stats.get('hits', 0) %}
+                            {% set misses = stats.get('misses', 0) %}
+                            {% set total = hits + misses %}
+                            {{ ((hits / total * 100) if total > 0 else 0)|round(1) }}%
+                        </div>
+                        <div class="stat-label">Hit Rate</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Actions Bar -->
+            <div class="actions-bar">
+                <div class="search-box">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="searchInput" placeholder="Поиск ключей (используйте * для паттерна)...">
+                    <button onclick="searchKeys()" class="btn-secondary">
+                        <i class="fas fa-search"></i> Найти
+                    </button>
+                </div>
+                <div class="action-buttons">
+                    <button onclick="showAddKeyModal()" class="btn-success">
+                        <i class="fas fa-plus"></i> Добавить ключ
+                    </button>
+                    <button onclick="refreshData()" class="btn-secondary">
+                        <i class="fas fa-sync-alt"></i> Обновить
+                    </button>
+                    <button onclick="confirmFlush()" class="btn-danger">
+                        <i class="fas fa-trash-alt"></i> Очистить всё
+                    </button>
+                </div>
+            </div>
+
+            <!-- Keys Table -->
+            <div class="card">
+                <div class="card-header">
+                    <h2><i class="fas fa-list"></i> Ключи в базе</h2>
+                    <div class="table-controls">
+                        <select id="typeFilter" onchange="filterKeys()">
+                            <option value="all">Все типы</option>
+                            <option value="string">String</option>
+                            <option value="hash">Hash</option>
+                            <option value="list">List</option>
+                            <option value="set">Set</option>
+                            <option value="zset">Sorted Set</option>
+                        </select>
+                        <select id="sortBy" onchange="sortKeys()">
+                            <option value="key">Сортировка по ключу</option>
+                            <option value="type">Сортировка по типу</option>
+                            <option value="size">Сортировка по размеру</option>
+                            <option value="ttl">Сортировка по TTL</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="table-container">
+                    <table class="keys-table">
+                        <thead>
+                            <tr>
+                                <th>Ключ</th>
+                                <th>Тип</th>
+                                <th>Значение (предпросмотр)</th>
+                                <th>Размер</th>
+                                <th>TTL</th>
+                                <th>Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody id="keysTableBody">
+                            {% if keys %}
+                                {% for item in keys %}
+                                <tr data-type="{{ item.type }}">
+                                    <td class="key-cell">
+                                        <i class="fas fa-key"></i>
+                                        <span class="key-name">{{ item.key }}</span>
+                                    </td>
+                                    <td>
+                                        <span class="type-badge type-{{ item.type }}">
+                                            {{ item.type }}
+                                        </span>
+                                    </td>
+                                    <td class="value-cell">
+                                        <div class="value-preview">
+                                            {{ item.preview }}
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <span class="size-badge">
+                                            {{ item.size|filesizeformat }}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        {% if item.ttl > 0 %}
+                                        <span class="ttl-badge">
+                                            {{ item.ttl }}s
+                                        </span>
+                                        {% else %}
+                                        <span class="ttl-badge infinite">
+                                            ∞
+                                        </span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <div class="action-buttons">
+                                            <button onclick="viewKey('{{ item.key }}')"
+                                                    class="btn-icon btn-info"
+                                                    title="Просмотреть">
+                                                <i class="fas fa-eye"></i>
+                                            </button>
+                                            <button onclick="editKey('{{ item.key }}')"
+                                                    class="btn-icon btn-warning"
+                                                    title="Редактировать">
+                                                <i class="fas fa-edit"></i>
+                                            </button>
+                                            <button onclick="deleteKey('{{ item.key }}')"
+                                                    class="btn-icon btn-danger"
+                                                    title="Удалить">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                            <button onclick="copyKey('{{ item.key }}')"
+                                                    class="btn-icon btn-secondary"
+                                                    title="Копировать ключ">
+                                                <i class="fas fa-copy"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            {% else %}
+                                <tr>
+                                    <td colspan="6" class="empty-state">
+                                        <i class="fas fa-inbox"></i>
+                                        <p>Нет ключей в базе данных</p>
+                                        <button onclick="showAddKeyModal()" class="btn-success">
+                                            <i class="fas fa-plus"></i> Добавить первый ключ
+                                        </button>
+                                    </td>
+                                </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="table-footer">
+                    <div class="pagination">
+                        <button onclick="prevPage()" class="btn-pagination">
+                            <i class="fas fa-chevron-left"></i>
+                        </button>
+                        <span id="pageInfo">Страница 1 из 1</span>
+                        <button onclick="nextPage()" class="btn-pagination">
+                            <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </div>
+                    <div class="table-info">
+                        Показано <span id="shownCount">{{ keys|length }}</span> из
+                        <span id="totalCount">{{ keys|length }}</span> ключей
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div id="addKeyModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-plus-circle"></i> Добавить ключ</h3>
+                <button onclick="closeModal('addKeyModal')" class="modal-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="addKeyForm" class="form">
+                    <div class="form-group">
+                        <label for="newKey">Ключ:</label>
+                        <input type="text" id="newKey" required
+                               placeholder="my:key:name">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="newKeyType">Тип данных:</label>
+                        <select id="newKeyType" onchange="onTypeChange()" required>
+                            <option value="string">String (строка)</option>
+                            <option value="hash">Hash (словарь)</option>
+                            <option value="list">List (список)</option>
+                            <option value="set">Set (множество)</option>
+                            <option value="zset">Sorted Set (упорядоченное множество)</option>
+                        </select>
+                    </div>
+
+                    <div id="valueInputContainer">
+                        <!-- Динамически меняется в зависимости от типа -->
+                        <div class="form-group">
+                            <label for="newValue">Значение:</label>
+                            <textarea id="newValue" rows="4" required
+                                      placeholder='Введите значение...'></textarea>
+                            <div class="form-hint" id="valueHint">
+                                Для Hash: {"field1": "value1", "field2": "value2"}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="newTTL">TTL (время жизни):</label>
+                        <div class="ttl-controls">
+                            <input type="number" id="newTTL" value="-1" min="-1">
+                            <select id="ttlUnit" onchange="updateTTL()">
+                                <option value="seconds">секунд</option>
+                                <option value="minutes">минут</option>
+                                <option value="hours">часов</option>
+                                <option value="days">дней</option>
+                            </select>
+                        </div>
+                        <small>-1 = бесконечно (без TTL)</small>
+                    </div>
+
+                    <div class="modal-actions">
+                        <button type="button" onclick="closeModal('addKeyModal')"
+                                class="btn-secondary">Отмена</button>
+                        <button type="submit" class="btn-success">
+                            <i class="fas fa-save"></i> Сохранить
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="viewKeyModal" class="modal">
+        <div class="modal-content modal-lg">
+            <div class="modal-header">
+                <h3 id="viewKeyTitle"><i class="fas fa-eye"></i> Просмотр ключа</h3>
+                <button onclick="closeModal('viewKeyModal')" class="modal-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div id="keyDetailsContent">
+                    <!-- Загружается динамически -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Container -->
+    <div id="notificationContainer"></div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
